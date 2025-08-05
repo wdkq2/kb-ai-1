@@ -1,0 +1,6 @@
+# Ignore Python cache and local environment secrets
+__pycache__/
+*.pyc
+
+# Local environment file with secrets should not be committed
+.env

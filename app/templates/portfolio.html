@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>보유 종목</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+    h1 { font-size: 2em; margin-bottom: 20px; }
+    section { margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    table { width:100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align:center; }
+    th { background-color: #f1f1f1; }
+    button { padding: 4px 8px; border:none; border-radius:4px; cursor: pointer; background-color:#007bff; color:#fff; }
+    button:hover { background-color:#0056b3; }
+    a { color:#007bff; text-decoration:none; margin-right:10px; }
+    a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <h1>보유 종목</h1>
+  <nav>
+    <a href="/">포트폴리오 주문</a>
+    <a href="/scenario">시나리오 주문</a>
+  </nav>
+  <section id="holdings-section">
+    <h3>종목별 보유현황</h3>
+    <table id="holdings-table">
+      <tr><th>종목</th><th>수량</th><th>평균가</th><th>현재가</th><th>평가금액</th><th>섹터</th><th>시나리오</th><th>이유</th><th>보고서</th></tr>
+    </table>
+  </section>
+  <section id="sector-section">
+    <h3>섹터 비중 (%)</h3>
+    <table id="sector-table">
+      <tr><th>섹터</th><th>비중</th></tr>
+    </table>
+  </section>
+  <script>
+    async function loadPortfolio() {
+      const res = await fetch('/api/holdings');
+      if(!res.ok) {
+        alert('보유 정보를 불러오지 못했습니다.');
+        return;
+      }
+      const data = await res.json();
+      const tbody=document.getElementById('holdings-table');
+      // remove existing rows except header
+      tbody.innerHTML='<tr><th>종목</th><th>수량</th><th>평균가</th><th>현재가</th><th>평가금액</th><th>섹터</th><th>시나리오</th><th>이유</th><th>보고서</th></tr>';
+      data.holdings.forEach(h=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td>'+h.symbol+'</td>'+
+          '<td>'+h.quantity+'</td>'+
+          '<td>'+ (h.avg_price ? h.avg_price.toLocaleString() : '-') +'</td>'+
+          '<td>'+ (h.current_price ? h.current_price.toLocaleString() : '-') +'</td>'+
+          '<td>'+ (h.value ? h.value.toLocaleString() : '-') +'</td>'+
+          '<td>'+h.sector+'</td>'+
+          '<td>'+ (h.scenario || '-') +'</td>'+
+          '<td>'+ (h.reason || '-') +'</td>'+
+          '<td><button onclick="generateReport(\''+h.symbol+'\')">작성</button></td>';
+        tbody.appendChild(tr);
+      });
+      // sector table
+      const sectorTable=document.getElementById('sector-table');
+      sectorTable.innerHTML='<tr><th>섹터</th><th>비중</th></tr>';
+      for(const sector in data.sector_distribution) {
+        const pct=data.sector_distribution[sector];
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td>'+sector+'</td><td>'+pct.toFixed(2)+'%</td>';
+        sectorTable.appendChild(tr);
+      }
+    }
+    async function generateReport(symbol) {
+      try {
+        const res = await fetch('/api/report', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({symbol})
+        });
+        if(!res.ok) {
+          const msg=await res.text();
+          throw new Error(msg || res.status);
+        }
+        const data=await res.json();
+        alert(data.report);
+      } catch(e) {
+        alert('보고서 생성 실패: '+e.message);
+      }
+    }
+    window.onload=loadPortfolio;
+  </script>
+</body>
+</html>

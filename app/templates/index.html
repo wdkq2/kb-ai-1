@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>나만의 펀드</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+    h1 { font-size: 2em; margin-bottom: 20px; }
+    section { margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display:block; margin-bottom: 10px; }
+    label span { display:inline-block; width: 120px; font-weight: bold; }
+    input, select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; min-width: 180px; }
+    table { width:100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align:center; }
+    th { background-color: #f1f1f1; }
+    button { padding: 8px 16px; margin-right: 8px; border:none; border-radius:4px; cursor: pointer; background-color:#007bff; color:#fff; }
+    button:hover { background-color:#0056b3; }
+    .results section { margin-top: 20px; }
+    pre { background-color:#f8f9fa; padding:10px; border-radius:4px; overflow-x:auto; }
+  </style>
+</head>
+<body>
+  <h1>나만의 펀드</h1>
+  <nav>
+    <a href="/scenario" style="color:#007bff;text-decoration:none;margin-right:10px;">시나리오 주문</a>
+    <a href="/portfolio" style="color:#007bff;text-decoration:none;">보유 종목</a>
+  </nav>
+
+  <section id="settings">
+    <h3>환경설정</h3>
+    <label><span>모드</span>
+      <select id="mode">
+        <option value="virtual">모의</option>
+        <option value="real">실전</option>
+      </select>
+    </label>
+    <label><span>App Key</span>
+      <input id="appkey" autocomplete="off" placeholder="API Key" />
+    </label>
+    <label><span>App Secret</span>
+      <input id="appsecret" type="password" autocomplete="off" placeholder="API Secret" />
+    </label>
+    <label><span>CANO</span>
+      <input id="cano" autocomplete="off" placeholder="Account No." />
+    </label>
+    <label><span>ACNT 코드</span>
+      <input id="acnt" autocomplete="off" placeholder="Account Product Code" />
+    </label>
+  </section>
+
+  <section id="portfolio">
+    <h3>포트폴리오 입력</h3>
+    <label><span>총 투자금</span>
+      <input id="total_cash" type="number" value="1000000" />
+    </label>
+    <label><span>초기매수 비율</span>
+      <input id="init_ratio" type="number" step="0.01" value="0.5" />
+    </label>
+    <label><span>할인률</span>
+      <input id="discount" type="number" step="0.01" value="0.03" />
+    </label>
+    <button type="button" id="add-row">종목 추가</button>
+    <table id="items">
+      <thead>
+        <tr><th>종목코드</th><th>투자 이유</th></tr>
+      </thead>
+      <tbody>
+      </tbody>
+    </table>
+  </section>
+
+  <button id="calc-btn">비중 추천 → 미리보기</button>
+  <button id="exec-btn" style="display:none;">주문 실행</button>
+
+  <!-- Message area for inline feedback (errors and success). This will be
+       populated by the JavaScript functions below to provide clear,
+       actionable feedback rather than relying on modal alert boxes. -->
+  <div id="msg" style="margin-top:15px;font-weight:bold;"></div>
+
+  <div id="weights" class="results"></div>
+  <div id="preview" class="results"></div>
+  <div id="execute" class="results"></div>
+
+  <script>
+    // Helper to display messages to the user. If isError is true the text is
+    // shown in red, otherwise in green. The area is cleared on every action.
+    function showMessage(msg, isError=true) {
+      const div = document.getElementById('msg');
+      if (!div) return;
+      div.style.color = isError ? '#dc3545' : '#28a745';
+      div.textContent = msg;
+    }
+    // Dynamically add rows for portfolio items
+    function addRow(){
+      const tbody=document.querySelector('#items tbody');
+      const row=document.createElement('tr');
+      row.innerHTML='<td><input name="symbol" autocomplete="off" /></td><td><input name="reason" style="width:100%" /></td>';
+      tbody.appendChild(row);
+    }
+    // add two initial rows
+    addRow(); addRow();
+
+    document.getElementById('add-row').addEventListener('click', addRow);
+
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(data)
+      });
+      if(!res.ok) {
+        let msg;
+        try {
+          // Try to parse JSON error responses
+          const json = await res.json();
+          msg = json.detail || JSON.stringify(json);
+        } catch(_) {
+          msg = await res.text();
+        }
+        throw new Error(msg || res.status);
+      }
+      return res.json();
+    }
+
+    document.getElementById('calc-btn').addEventListener('click', async ()=>{
+      // update token if credentials provided
+      const mode=document.getElementById('mode').value;
+      const appkey=document.getElementById('appkey').value;
+      const appsecret=document.getElementById('appsecret').value;
+      // Clear any prior messages
+      showMessage('');
+      try {
+        await postJson('/api/kis/token',{appkey,appsecret,mode});
+      } catch (e) {
+        showMessage('토큰 발급 실패: '+e.message, true);
+        return;
+      }
+      // clear sensitive fields after use
+      document.getElementById('appkey').value='';
+      document.getElementById('appsecret').value='';
+
+      // build items array
+      const rows=document.querySelectorAll('#items tbody tr');
+      const items=[];
+      rows.forEach((row)=>{
+        const symbol=row.querySelector('input[name="symbol"]').value.trim();
+        const reason=row.querySelector('input[name="reason"]').value.trim();
+        if(symbol) items.push({symbol, reason});
+      });
+      if(items.length===0) {
+        showMessage('종목을 입력해주세요.', true);
+        return;
+      }
+      const total_cash=parseFloat(document.getElementById('total_cash').value);
+      const initial_buy_ratio=parseFloat(document.getElementById('init_ratio').value);
+      const discount_rate=parseFloat(document.getElementById('discount').value);
+      let weightRes;
+      try {
+        weightRes=await postJson('/api/portfolio/weights',{total_cash,items,initial_buy_ratio,discount_rate});
+      } catch(e) {
+        showMessage('비중 계산 실패: '+e.message, true);
+        return;
+      }
+      let whtml='<section><h3>비중 결과</h3><table><tr><th>종목</th><th>비중</th><th>초기</th><th>잔여</th><th>지정가</th></tr>';
+      weightRes.results.forEach(r=>{whtml+=`<tr><td>${r.symbol}</td><td>${(r.weight*100).toFixed(2)}%</td><td>${r.initial_buy_cash.toLocaleString()}</td><td>${r.dca_cash.toLocaleString()}</td><td>${r.limit_price_hint.toLocaleString()}</td></tr>`});
+      whtml+='</table></section>';
+      document.getElementById('weights').innerHTML=whtml;
+
+      // build preview
+      const previewReq={results: weightRes.results, total_cash};
+      let previewRes;
+      try {
+        previewRes=await postJson('/api/orders/preview', previewReq);
+      } catch(e) {
+        showMessage('주문 프리뷰 실패: '+e.message, true);
+        return;
+      }
+      window.lastPreview=previewRes;
+      let phtml='<section><h3>주문 프리뷰</h3><table><tr><th>종목</th><th>시장가 수량</th><th>지정가 수량</th><th>지정가</th><th>필요 현금</th></tr>';
+      previewRes.items.forEach(i=>{phtml+=`<tr><td>${i.symbol}</td><td>${i.qty_market}</td><td>${i.qty_limit}</td><td>${i.limit_price}</td><td>${i.cash_needed.toLocaleString()}</td></tr>`});
+      phtml+='</table></section>';
+      document.getElementById('preview').innerHTML=phtml;
+      document.getElementById('exec-btn').style.display='inline-block';
+      showMessage('비중 및 주문 미리보기 계산이 완료되었습니다.', false);
+    });
+
+    document.getElementById('exec-btn').addEventListener('click', async ()=>{
+      if(!window.lastPreview) return;
+      let res;
+      try {
+        res = await postJson('/api/orders/execute', window.lastPreview);
+      } catch(e) {
+        showMessage('주문 실패: '+e.message, true);
+        return;
+      }
+      let html='<section><h3>주문 결과</h3><pre>'+JSON.stringify(res, null, 2)+'</pre></section>';
+      document.getElementById('execute').innerHTML=html;
+      showMessage('주문이 성공적으로 실행되었습니다.', false);
+    });
+  </script>
+</body>
+</html>

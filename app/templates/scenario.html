@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>시나리오 주문</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+    h1 { font-size: 2em; margin-bottom: 20px; }
+    section { margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    label { display:block; margin-bottom: 10px; }
+    label span { display:inline-block; width: 140px; font-weight: bold; }
+    input, select { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; min-width: 200px; }
+    button { padding: 8px 16px; margin-right: 8px; border:none; border-radius:4px; cursor: pointer; background-color:#007bff; color:#fff; }
+    button:hover { background-color:#0056b3; }
+    .results section { margin-top: 20px; }
+    table { width:100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align:center; }
+    th { background-color: #f1f1f1; }
+    pre { background-color:#f8f9fa; padding:10px; border-radius:4px; overflow-x:auto; }
+    a { color:#007bff; text-decoration:none; margin-right:10px; }
+    a:hover { text-decoration:underline; }
+  </style>
+</head>
+<body>
+  <h1>시나리오 주문</h1>
+  <nav>
+    <a href="/">포트폴리오 주문</a>
+    <a href="/portfolio">보유 종목</a>
+  </nav>
+  <section id="scenario-form">
+    <h3>주문 입력</h3>
+    <label><span>종목코드</span>
+      <input id="symbol" autocomplete="off" placeholder="예: 005930" />
+    </label>
+    <label><span>매매 이유</span>
+      <input id="reason" autocomplete="off" placeholder="매매 이유를 입력" />
+    </label>
+    <label><span>총 투자금</span>
+      <input id="cash" type="number" value="1000000" />
+    </label>
+    <label><span>시나리오 선택</span>
+      <select id="scenario">
+        <option value="basic">기본형 (50% 시장가 / 50% -3% 지정가)</option>
+        <option value="confident">확신형 (100% 시장가)</option>
+        <option value="chase">추격매수형 (30% 시장가 / 30% +5% 지정가 / 40% +10% 지정가)</option>
+        <option value="conservative">보수형 (30% 시장가 / 20% -3% 지정가 / 50% -6% 지정가)</option>
+      </select>
+    </label>
+    <hr />
+    <label><span>모드</span>
+      <select id="mode">
+        <option value="virtual">모의</option>
+        <option value="real">실전</option>
+      </select>
+    </label>
+    <label><span>App Key</span>
+      <input id="appkey" autocomplete="off" placeholder="API Key" />
+    </label>
+    <label><span>App Secret</span>
+      <input id="appsecret" type="password" autocomplete="off" placeholder="API Secret" />
+    </label>
+    <button type="button" id="preview-btn">미리보기</button>
+    <button type="button" id="execute-btn" style="display:none;">주문 실행</button>
+  </section>
+  <div id="preview" class="results"></div>
+  <div id="execute" class="results"></div>
+  <script>
+    async function postJson(url, data) {
+      const res = await fetch(url, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(data)
+      });
+      if(!res.ok) {
+        const msg = await res.text();
+        throw new Error(msg || res.status);
+      }
+      return res.json();
+    }
+
+    document.getElementById('preview-btn').addEventListener('click', async ()=>{
+      const mode=document.getElementById('mode').value;
+      const appkey=document.getElementById('appkey').value;
+      const appsecret=document.getElementById('appsecret').value;
+      // issue token if credentials provided
+      try {
+        await postJson('/api/kis/token',{appkey,appsecret,mode});
+      } catch (e) {
+        alert('토큰 발급 실패: '+e.message);
+        return;
+      }
+      // clear sensitive fields
+      document.getElementById('appkey').value='';
+      document.getElementById('appsecret').value='';
+      const symbol=document.getElementById('symbol').value.trim();
+      const reason=document.getElementById('reason').value.trim();
+      const total_cash=parseFloat(document.getElementById('cash').value);
+      const scenario=document.getElementById('scenario').value;
+      if(!symbol) { alert('종목코드를 입력하세요.'); return; }
+      if(!total_cash || total_cash <= 0) { alert('투자금이 유효하지 않습니다.'); return; }
+      let plan;
+      try {
+        plan=await postJson('/api/scenario/preview',{symbol,total_cash,scenario,reason});
+      } catch(e) {
+        alert('시나리오 계산 실패: '+e.message);
+        return;
+      }
+      window.lastPlan=plan;
+      let html='<section><h3>주문 계획</h3>';
+      html+='<p>현재가: '+plan.price.toLocaleString()+'원</p>';
+      html+='<table><tr><th>주문유형</th><th>비중</th><th>수량</th><th>가격</th></tr>';
+      plan.orders.forEach(o=>{
+        html+='<tr><td>'+o.order_type+'</td><td>'+ (o.ratio*100).toFixed(2)+'%</td><td>'+o.qty+'</td><td>'+(o.price ? o.price.toLocaleString() : '시장가')+'</td></tr>';
+      });
+      html+='</table></section>';
+      document.getElementById('preview').innerHTML=html;
+      document.getElementById('execute-btn').style.display='inline-block';
+    });
+    document.getElementById('execute-btn').addEventListener('click', async ()=>{
+      if(!window.lastPlan) return;
+      try {
+        const res = await postJson('/api/scenario/execute', window.lastPlan);
+        let html='<section><h3>주문 결과</h3><pre>'+JSON.stringify(res, null, 2)+'</pre></section>';
+        document.getElementById('execute').innerHTML=html;
+        // hide execute button after execution
+        document.getElementById('execute-btn').style.display='none';
+      } catch(e) {
+        alert('주문 실패: '+e.message);
+      }
+    });
+  </script>
+</body>
+</html>
